@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-primary: 76 110 245; /* #4C6EF5 */
+    --brand-secondary: 241 243 245; /* #F1F3F5 */
+    --brand-background: 248 249 250; /* #F8F9FA */
+    --brand-surface: 255 255 255; /* #FFFFFF */
+    --brand-border: 222 226 230; /* #DEE2E6 */
+    --brand-text-primary: 33 37 41; /* #212529 */
+    --brand-text-secondary: 108 117 125; /* #6C757D */
+  }
+
+  .dark {
+    --brand-primary: 90 120 250;
+    --brand-secondary: 40 45 59;
+    --brand-background: 19 22 32;
+    --brand-surface: 28 32 45;
+    --brand-border: 55 62 81;
+    --brand-text-primary: 248 249 250;
+    --brand-text-secondary: 173 181 189;
+  }
+
+  body {
+    @apply bg-brand-background text-brand-text-primary font-sans;
+  }
+
+  /* Styling voor Markdown content */
+  .prose {
+    color: rgb(var(--brand-text-primary));
+  }
+  .prose h1, .prose h2, .prose h3, .prose h4, .prose strong {
+    color: rgb(var(--brand-text-primary));
+  }
+  .prose a {
+    color: rgb(var(--brand-primary));
+  }
+}
