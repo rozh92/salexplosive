@@ -1,7 +1,0 @@
-{
-  "name": "Salexplosive",
-  "description": "An AI-powered web application designed to assist sales professionals. It features an AI Pitch Maker, a simple CRM for notes and client management, a competitor analysis tool with data visualizations, and goal tracking to enhance sales productivity.",
-  "requestFramePermissions": [
-    "microphone"
-  ]
-}
