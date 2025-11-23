@@ -1,5 +1,5 @@
 {
-  "name": "SalExplosive",
+  "name": "Salexplosive",
   "description": "Secure Sales Management & AI Coaching Portal. Authorized access only.",
   "requestFramePermissions": [
     "microphone"
