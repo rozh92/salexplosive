@@ -7,13 +7,13 @@ import { getStorage } from "firebase/storage";
 // TODO: Vervang dit object met de firebaseConfig die u uit uw Firebase projectinstellingen heeft gekopieerd.
 // Dit is de 'digitale sleutel' die uw webapp verbindt met uw Firebase backend.
 export const firebaseConfig = {
-  apiKey: "AIzaSyBYgPPPg83xwrguxEZbxbnP_2QwEET8los",
+  apiKey: "PLAK_HIER_JE_NIEUWE_API_KEY",
   authDomain: "salexplosive.firebaseapp.com",
   projectId: "salexplosive",
   storageBucket: "salexplosive.firebasestorage.app",
-  messagingSenderId: "642364074756",
-  appId: "1:642364074756:web:b787af9924dc4626b6be51",
-  measurementId: "G-SL43JRJE0V"
+  messagingSenderId: "PLAK_HIER_JE_SENDER_ID",
+  appId: "PLAK_HIER_JE_APP_ID",
+  measurementId: "G-OPTIONAL"
 };
 
 // Initialiseer de Firebase app
