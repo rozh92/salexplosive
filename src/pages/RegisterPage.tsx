@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { User } from '../types';
@@ -339,6 +338,16 @@ const RegisterPage: React.FC = () => {
                             {t('login_here')}
                         </a>
                     </p>
+                </div>
+
+                {/* Anti-Phishing / Legitimacy Footer */}
+                <div className="mt-8 border-t border-brand-border pt-4 text-center text-xs text-brand-text-secondary">
+                  <div className="flex justify-center space-x-4">
+                    <a href="/#/privacy" className="hover:text-brand-primary transition-colors">{t('footer_privacy')}</a>
+                    <a href="/#/terms" className="hover:text-brand-primary transition-colors">{t('footer_terms')}</a>
+                    <a href="/#/contact" className="hover:text-brand-primary transition-colors">{t('footer_contact')}</a>
+                  </div>
+                  <p className="mt-2">&copy; {new Date().getFullYear()} SalExplosive. Alle rechten voorbehouden.</p>
                 </div>
              </div>
         </div>
