@@ -1,13 +1,18 @@
 import { GoogleGenAI, GenerateContentResponse, Chat } from "@google/genai";
 import { User, Goal, Client, Pitch, Sale, Appointment } from '../types';
 
-const API_KEY = process.env.API_KEY;
+// LIVE MODE FIX:
+// Vite gebruikt import.meta.env voor variabelen.
+// We checken hier op VITE_GOOGLE_AI_KEY.
+const API_KEY = import.meta.env.VITE_GOOGLE_AI_KEY;
 
+// We loggen een waarschuwing in plaats van te crashen, zodat de site wel laadt.
 if (!API_KEY) {
-    throw new Error("API_KEY environment variable not set");
+    console.warn("Let op: VITE_GOOGLE_AI_KEY is niet ingesteld. AI functies zullen niet werken.");
 }
 
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+// Initialiseer met de key (of een lege string om crash bij init te voorkomen, calls zullen wel falen)
+const ai = new GoogleGenAI({ apiKey: API_KEY || '' });
 
 const langMap: Record<string, string> = {
     'nl': 'Dutch',
@@ -26,6 +31,8 @@ export const generatePitch = async (
     lang: string = 'nl',
     selectedIndustry?: 'telecom' | 'energy' | ''
 ): Promise<string> => {
+    if (!API_KEY) return "AI Configuratie Fout: API Key ontbreekt. Controleer je instellingen.";
+
     try {
         const targetLanguage = langMap[lang] || 'Dutch';
         const pitchIndustry = selectedIndustry || (user.industry !== 'beide' ? user.industry : 'zowel telecom als energie');
@@ -89,10 +96,10 @@ ${basePrompt}`
             contents: finalPrompt,
         });
         
-        return response.text;
+        return response.text || "Geen antwoord ontvangen.";
     } catch (error) {
         console.error("Error generating pitch:", error);
-        throw new Error("Er is een fout opgetreden bij het genereren van de pitch.");
+        return "Er is een fout opgetreden bij het genereren van de pitch. Controleer uw internetverbinding en probeer het opnieuw.";
     }
 };
 
@@ -101,6 +108,8 @@ export const analyzeCompetitors = async (
     details: any,
     competitorsToAnalyze: string[]
 ): Promise<string> => {
+    if (!API_KEY) return "[]";
+
     let prompt = '';
     const competitorList = competitorsToAnalyze.join(', ');
 
@@ -196,15 +205,15 @@ export const analyzeCompetitors = async (
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-pro",
+            model: "gemini-2.5-pro", // Pro model voor zoekfunctie
             contents: prompt,
             config: {
                 tools: [{googleSearch: {}}],
-                thinkingConfig: { thinkingBudget: 16384 }
+                thinkingConfig: { thinkingBudget: 1024 } // Lager budget voor snelheid
             },
         });
         
-        return response.text;
+        return response.text || "[]";
     } catch (error) {
         console.error(`Error analyzing ${market} competitors:`, error);
         return "[]";
@@ -212,6 +221,8 @@ export const analyzeCompetitors = async (
 };
 
 export const getCompetitorSummary = async (ourOffer: any, competitorData: any[], lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
     const targetLanguage = langMap[lang] || 'Dutch';
     const prompt = `
         As a sales strategist, compare my offer with my competitors' data.
@@ -236,7 +247,7 @@ export const getCompetitorSummary = async (ourOffer: any, competitorData: any[],
             model: "gemini-2.5-flash",
             contents: prompt,
         });
-        return response.text;
+        return response.text || "Geen samenvatting beschikbaar.";
     } catch (error) {
         console.error("Error getting competitor summary:", error);
         return "Kon geen strategische samenvatting genereren.";
@@ -245,6 +256,8 @@ export const getCompetitorSummary = async (ourOffer: any, competitorData: any[],
 
 
 export const getPitchSuggestions = async (pitchContent: string, lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
     const targetLanguage = langMap[lang] || 'Dutch';
     try {
         const prompt = `
@@ -274,7 +287,7 @@ export const getPitchSuggestions = async (pitchContent: string, lang: string = '
             contents: prompt,
         });
 
-        return response.text;
+        return response.text || "Geen suggesties beschikbaar.";
     } catch (error) {
         console.error("Error getting pitch suggestions:", error);
         return "Er is een fout opgetreden bij het ophalen van suggesties. Probeer het opnieuw.";
@@ -282,6 +295,8 @@ export const getPitchSuggestions = async (pitchContent: string, lang: string = '
 };
 
 export const analyzeNotes = async (notes: string, lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
     const targetLanguage = langMap[lang] || 'Dutch';
     if (!notes || notes.trim() === '') {
         return "Geen notities om te analyseren.";
@@ -310,14 +325,332 @@ export const analyzeNotes = async (notes: string, lang: string = 'nl'): Promise<
             contents: prompt,
         });
 
-        return response.text;
+        return response.text || "Geen analyse beschikbaar.";
     } catch (error) {
         console.error("Error analyzing notes:", error);
         return "Er is een fout opgetreden bij het analyseren van de notities.";
     }
 };
 
+export const generateWeeklyReview = async (user: User, goals: Goal[], clients: Client[], pitches: Pitch[], lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const recentSales = user.sales?.filter(s => new Date(s.date) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) || [];
+    const prompt = `
+        Analyze the past week's performance for a salesperson named ${user.name}.
+        Provide a concise, encouraging, and actionable weekly review in ${targetLanguage}.
+        Structure the output in Markdown with the following sections:
+
+        ### Terugblik op de Week
+        Summarize the key activities. Mention the number of new clients (${clients.length}), new pitches created (${pitches.length}), and total sales value (€${recentSales.reduce((sum, s) => sum + s.value, 0).toFixed(2)}).
+
+        ### Voortgang op Doelen
+        Compare the weekly sales performance against their set goals.
+        - Goals: ${JSON.stringify(goals)}
+        - Sales this week value: €${recentSales.reduce((sum, s) => sum + s.value, 0).toFixed(2)}
+        Is the salesperson on track? What went well?
+
+        ### Focuspunten voor Volgende Week
+        Based on the performance, provide 2-3 concrete and actionable tips for the upcoming week. The tone should be positive and motivating.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Geen review beschikbaar.";
+    } catch (error) {
+        console.error("Error generating weekly review:", error);
+        throw new Error("Failed to generate weekly review.");
+    }
+};
+
+export const generateDailyTip = async (user: User, goals: Goal[], sales: Sale[], lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const salesToday = sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString());
+    const prompt = `
+        Generate a single, short, actionable, and motivational sales tip for ${user.name} for today.
+        The tip should be in ${targetLanguage}.
+        Keep it under 30 words.
+        Context:
+        - Salesperson profile: Industry is ${user.industry}, sales channel is ${user.salesChannel}.
+        - Goals: ${JSON.stringify(goals)}
+        - Sales so far today: ${salesToday.length} sales with a total value of €${salesToday.reduce((sum, s) => sum + s.value, 0).toFixed(2)}.
+        - Based on this, provide a specific tip. For example, if they have no sales, motivate them to start strong. If they are close to a goal, encourage them for the final push.
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Zet hem op vandaag!";
+    } catch (error) {
+        console.error("Error generating daily tip:", error);
+        return "Veel succes met verkopen vandaag!";
+    }
+};
+
+export const summarizeAgendaForManager = async (appointments: Appointment[], lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return lang === 'nl' ? "Kan agenda niet laden (API Key mist)." : "Cannot load agenda (API Key missing).";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    if (appointments.length === 0) {
+        return lang === 'nl' ? "Geen afspraken voor vandaag." : "No appointments for today.";
+    }
+    const prompt = `
+        Summarize the following agenda for today for a sales manager.
+        Provide a very brief overview, highlighting the number of appointments and any key moments (e.g., first or last appointment of the day).
+        The summary should be in ${targetLanguage} and no more than 2 short sentences.
+        Agenda:
+        ${JSON.stringify(appointments)}
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Agenda overzicht niet beschikbaar.";
+    } catch (error) {
+        console.error("Error summarizing agenda:", error);
+        throw new Error("Failed to summarize agenda.");
+    }
+};
+
+export const generatePreCallBriefing = async (user: User, client: Client, lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const prompt = `
+        Generate a pre-call briefing for a salesperson (${user.name}) about to contact a client (${client.name} from ${client.company}).
+        Use the provided notes to create a structured briefing in ${targetLanguage} and Markdown.
+        The briefing must have these sections:
+
+        ### Klantprofiel
+        Briefly summarize who the client is based on the notes.
+
+        ### Belangrijkste Punten uit Notities
+        Extract 2-3 key bullet points from the previous conversations.
+
+        ### Doel van dit Gesprek
+        Suggest a primary and a secondary objective for this call.
+
+        ### Mogelijke Opening
+        Suggest one or two opening lines for the conversation, referencing past interactions.
+
+        --- NOTES ---
+        ${client.notes}
+        --- END NOTES ---
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Geen briefing beschikbaar.";
+    } catch (error) {
+        console.error("Error generating pre-call briefing:", error);
+        throw new Error("Failed to generate pre-call briefing.");
+    }
+};
+
+export const generateClientProfile = async (notes: string, lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const prompt = `
+        Based on the following unstructured notes, generate a client profile.
+        The output should be in ${targetLanguage} and Markdown, with the following sections:
+
+        ### Klanttype
+        Describe the type of customer (e.g., price-conscious, service-oriented, skeptical, tech-savvy).
+
+        ### Belangrijkste Behoeften & Pijnpunten
+        List 2-3 key needs or pain points mentioned in the notes.
+
+        ### Communicatiestijl
+        Advise on the best communication style to use with this client (e.g., formal, informal, direct, patient).
+        
+        --- NOTES ---
+        ${notes}
+        --- END NOTES ---
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Geen profiel beschikbaar.";
+    } catch (error) {
+        console.error("Error generating client profile:", error);
+        throw new Error("Failed to generate client profile.");
+    }
+};
+
+export const generateFollowUpEmail = async (user: User, analysis: string, goal: string, lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const prompt = `
+        You are an AI email assistant for a salesperson named ${user.name}.
+        Your task is to write a professional follow-up email in ${targetLanguage}.
+
+        **Context from the sales conversation analysis:**
+        ${analysis}
+
+        **The goal of this email is:** ${goal}.
+
+        **Instructions:**
+        - Write a complete email, including a subject line, greeting, body, and closing.
+        - Use the context from the conversation analysis to make the email personal and relevant.
+        - The tone should be professional but friendly.
+        - Sign off with the salesperson's name: ${user.name}.
+        - The output must be only the email content in Markdown.
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Kon geen email genereren.";
+    } catch (error) {
+        console.error("Error generating follow-up email:", error);
+        throw new Error("Failed to generate follow-up email.");
+    }
+};
+
+export const generateTeamPerformanceAnalysis = async (teamData: {name: string, sales: Sale[]}[], lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const prompt = `
+        As a sales manager, analyze the performance of the following team members based on their sales data for the past month.
+        Provide a concise analysis in ${targetLanguage} and Markdown.
+
+        The analysis should contain:
+        1.  **Overall Team Performance:** A brief summary of how the team is doing as a whole.
+        2.  **Top Performer:** Identify the top performer and briefly mention why.
+        3.  **Coaching Opportunity:** Identify one or two team members who might need extra support and suggest a positive way to approach this.
+
+        **Team Data:**
+        ${JSON.stringify(teamData, null, 2)}
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Geen analyse beschikbaar.";
+    } catch (error) {
+        console.error("Error generating team performance analysis:", error);
+        throw new Error("Failed to generate team performance analysis.");
+    }
+};
+
+export const generateMotivationPostInspiration = async (topic: string, lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const prompt = `
+        Write a short, motivational text for a sales team.
+        The topic is "${topic}".
+        The text should be inspiring, concise, and ready to be posted.
+        The output must be in ${targetLanguage}.
+        Don't include a title, just the body text.
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Geen inspiratie beschikbaar.";
+    } catch (error) {
+        console.error("Error generating motivation post inspiration:", error);
+        throw new Error("Failed to generate motivation post inspiration.");
+    }
+};
+
+export const generateSalesPlan = async (user: User, topic: string, lang: string = 'nl'): Promise<string> => {
+    if (!API_KEY) return "AI API Key ontbreekt.";
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const prompt = `
+        Create a simple, structured training plan for a sales team on the topic of "${topic}".
+        The output must be in ${targetLanguage} and in Markdown.
+        The plan should include:
+
+        ### Leerdoelen
+        List 2-3 key learning objectives.
+
+        ### Kernconcepten
+        Explain the main ideas in a few bullet points.
+
+        ### Oefening / Rollenspel
+        Describe a practical exercise or role-play scenario for the team to practice.
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "Geen plan beschikbaar.";
+    } catch (error) {
+        console.error("Error generating sales plan:", error);
+        throw new Error("Failed to generate sales plan.");
+    }
+};
+
+export const startHelpChat = (lang: string = 'nl'): Chat => {
+    if (!API_KEY) {
+        throw new Error("API Key missing");
+    }
+
+    const targetLanguage = langMap[lang] || 'Dutch';
+    const systemInstruction = `
+        You are a helpful AI assistant for the "Sales Copilot" application.
+        Your goal is to answer user questions about how to use the app.
+        You must respond in ${targetLanguage}.
+        Your knowledge is limited to the following features:
+        - Dashboard: View stats, goals, tips.
+        - Pitch Generator: Create sales pitches.
+        - Saved Pitches: View and analyze saved pitches.
+        - Pitch Practice: Practice pitches with an AI.
+        - Clients: Manage client information.
+        - Competitor Analysis: Analyze competitors.
+        - Competitor Notes: Save notes on competitors.
+        - Goals: Set sales goals.
+        - Team/Organization Views: For managers to see their teams.
+
+        Rules:
+        - Be friendly and concise.
+        - If you don't know the answer, say so.
+        - Do not answer questions outside of the app's functionality. Politely decline.
+        - Your first message should be a friendly greeting asking how you can help.
+    `;
+
+    try {
+        const chat: Chat = ai.chats.create({
+            model: 'gemini-2.5-flash',
+            config: {
+                systemInstruction: systemInstruction,
+            },
+        });
+        return chat;
+    } catch (error) {
+        console.error("Error starting help chat:", error);
+        throw new Error("Failed to start help chat.");
+    }
+};
+
+
 export const startAdviceChat = (user: User, lang: string = 'nl'): Chat => {
+    if (!API_KEY) {
+        throw new Error("API Key missing");
+    }
+
     const targetLanguage = langMap[lang] || 'Dutch';
     
     const systemInstruction = `
@@ -345,505 +678,6 @@ export const startAdviceChat = (user: User, lang: string = 'nl'): Chat => {
         return chat;
     } catch (error) {
         console.error("Error starting advice chat:", error);
-        throw new Error("Kon de AI Coach niet starten.");
-    }
-};
-
-export const startHelpChat = (lang: string = 'nl'): Chat => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-
-    const formalFormMap: Record<string, string> = {
-        'nl': "de 'U'-vorm",
-        'en': "the formal 'you'",
-        'de': "die 'Sie'-Form"
-    };
-    
-    const systemInstruction = `
-        U bent een formele, respectvolle en zeer professionele AI-assistent voor de webapplicatie 'Sales Copilot'. Uw enige doel is om duidelijke, stapsgewijze instructies te geven aan gebruikers over hoe ze de functies van de applicatie kunnen gebruiken. U moet te allen tijde in het ${targetLanguage} antwoorden, in een formele en respectvolle toon (gebruik ${formalFormMap[lang] || formalFormMap['nl']}). Baseer uw antwoorden uitsluitend op de onderstaande kennisbank. De kennisbank is in het Nederlands, maar u vertaalt de relevante informatie dynamisch naar ${targetLanguage} in uw antwoorden.
-
-        --- KENNISBANK SALES COPILOT ---
-
-        **ALGEMENE FUNCTIES**
-
-        *   **Dashboard**: Dit is uw startpagina. Het toont een overzicht van uw verkoopdoelen, een dagelijkse AI-tip en recente teamupdates van het management.
-        *   **Instellingen**: Hier kunt u uw bedrijfsnaam aanpassen (indien u geen manager bent). Andere gegevens zoals uw rol en e-mailadres zijn vastgezet.
-        *   **Profiel**: Hier kunt u uw naam en profielfoto wijzigen, en uw wachtwoord aanpassen.
-
-        **VERKOOP & STRATEGIE**
-
-        *   **Een Sale Registreren**:
-            1. Klik op de knop 'Registreer Sale' rechtsboven in het scherm.
-            2. Er verschijnt een venster met de productpakketten die uw manager heeft ingesteld voor uw team.
-            3. Selecteer het pakket dat u heeft verkocht.
-            4. Klik op 'Registreer' om de verkoop te voltooien. De waarde wordt automatisch bij uw doelen opgeteld.
-
-        *   **Pitch Generator**: Voor het creëren van een complete verkoopstrategie.
-            1. Navigeer naar 'Pitch Generator'.
-            2. Kies het type pitch: 'Normaal' of 'Kort & Krachtig'.
-            3. Vul uw verkoopstijl en de stad/wijk in waar u actief bent.
-            4. Klik op 'Genereer Strategie'. De AI levert een 4-delige strategie (buurtadvies, toonadvies, de pitch zelf, en bezwaren).
-            5. U kunt de strategie opslaan of de AI Coach om verfijning vragen.
-
-        *   **Opgeslagen Pitches**: Uw persoonlijke bibliotheek van strategieën.
-            1. Ga naar 'Opgeslagen Pitches'.
-            2. Selecteer een pitch uit de lijst om de details te bekijken.
-            3. U kunt de pitch bewerken, verwijderen, of een AI-analyse laten uitvoeren voor verbeterpunten.
-            4. Als u een 'leader' of 'team-leader' bent, kunt u een succesvolle pitch 'promoten' naar de Team Kennisbank.
-
-        *   **Pitch Oefenen**: Een interactieve rollenspelsimulator.
-            1. Ga naar 'Pitch Oefenen'.
-            2. Kies eerst een van uw opgeslagen pitches.
-            3. Kies vervolgens een AI-persona (bv. 'Sceptische Manager') om tegen te oefenen.
-            4. Start de sessie. U spreekt via uw microfoon en de AI reageert met audio.
-            5. Na afloop kunt u een transcriptie van het gesprek bekijken en AI-feedback op uw prestaties genereren.
-
-        **KLANTEN & CONCURRENTIE**
-
-        *   **Klanten**: Een eenvoudig CRM-systeem.
-            1. Navigeer naar 'Klanten'.
-            2. Voeg een nieuwe klant toe of selecteer een bestaande klant.
-            3. U kunt notities toevoegen en bewerken.
-            4. Gebruik de AI-knoppen om uw notities te analyseren, een 'Pre-Call Briefing' te genereren (die ook externe data gebruikt), of een klantprofiel op te stellen.
-            5. Voor telefonische verkopers is er ook een 'Email Assistent' om follow-up e-mails op te stellen.
-
-        *   **Concurrentieanalyse**: Vergelijk uw aanbod met de markt.
-            1. Ga naar 'Concurrentieanalyse'.
-            2. Kies uw markt (Telecom of Energie).
-            3. Selecteer de concurrenten die u wilt analyseren.
-            4. Vul de details van uw eigen aanbod in.
-            5. De AI gebruikt Google Search om actuele data te verzamelen en presenteert een vergelijking en een strategische samenvatting.
-
-        *   **Concurrentie Notities**: Deel inzichten met uw team.
-            1. Ga naar 'Concurrentie Notities'.
-            2. Hier kunt u notities van uzelf en teamleden bekijken over specifieke concurrenten.
-            3. Voeg een nieuwe notitie toe met specifieke details over pakketten, prijzen of USP's van een concurrent.
-
-        **DOELEN & MOTIVATIE**
-
-        *   **Doelen**: Stel uw persoonlijke verkoopdoelen in.
-            1. Ga naar 'Doelen'.
-            2. Stel een nieuw doel in door het aantal sales en de periode (dagelijks of wekelijks) te kiezen.
-            3. Actieve doelen worden hier weergegeven. U kunt ze ook verwijderen.
-            4. Uw voortgang is zichtbaar op het Dashboard.
-
-        *   **Team Updates (op Dashboard)**: Een feed met motiverende berichten van uw leidinggevenden. Leidinggevenden ('leader', 'team-leader', 'manager') kunnen hier nieuwe berichten plaatsen.
-
-        **TEAM & MANAGEMENT (ROL-AFHANKELIJK)**
-
-        *   **Mijn Team / Mijn Filiaal**:
-            *   **Salespersons**: Zien hier hun directe 'leader' en 'team-leader', en de collega's binnen hun directe team.
-            *   **Leaders & Team-Leaders**: Zien hier hun teamleden, hun prestaties en kunnen de rol van een 'salesperson' wijzigen naar 'leader' (en vice versa). Ze kunnen ook nieuwe leden toevoegen.
-            *   **Managers**: Zien een compleet overzicht van het hele filiaal ('Mijn Filiaal'), inclusief alle medewerkers, sectorstatistieken en prestaties. Ze kunnen ook **extra licenties aanvragen** via de knop 'Extra Licenties Kopen' op deze pagina.
-
-        *   **Hoe een teamlid toe te voegen (voor Leaders, Team-Leaders, Managers)**:
-            1. Navigeer naar de 'Mijn Team' of 'Mijn Filiaal' pagina.
-            2. Klik op de knop 'Voeg Lid Toe'.
-            3. Vul de gegevens van het nieuwe lid in (naam, e-mail, tijdelijk wachtwoord).
-            4. Selecteer de juiste rol. De beschikbare rollen hangen af van uw eigen rol.
-            5. Vul de branche, het bedrijf en het verkoopkanaal in.
-            6. Klik op 'Opslaan'. Het nieuwe lid ontvangt instructies en moet bij de eerste login een nieuw wachtwoord instellen.
-
-        *   **Team Kennisbank**:
-            *   **Voor iedereen**: Een bibliotheek met 'gouden pitches' (succesvolle strategieën) die door leiders zijn gepromoot. Managers kunnen hier ook algemene mededelingen plaatsen.
-            *   **Voor Leaders/Team-Leaders**: Kunnen een pitch vanuit 'Opgeslagen Pitches' promoten naar de kennisbank.
-            *   **Voor Managers**: Kunnen mededelingen plaatsen voor het hele filiaal.
-
-        *   **Planning (alleen voor Managers)**:
-            1. Ga naar 'Planning'.
-            2. Genereer een AI-trainingsplan door een onderwerp in te vullen.
-            3. Sla het gegenereerde plan op om het later te bekijken.
-            4. Beheer ook uw eigen agenda door afspraken toe te voegen en te bewerken.
-
-        *   **Pakketbeheer (alleen voor Managers)**:
-            1. Ga naar 'Pakketbeheer'.
-            2. Definieer hier de productpakketten die uw teams kunnen verkopen.
-            3. Voeg een nieuw pakket toe met een naam, branche, bedrijf en de 'contractwaarde' (een puntensysteem, bv. 1.0 of 0.5).
-            4. Deze pakketten verschijnen in de 'Registreer Sale' modal voor de verkopers.
-            
-        **OWNER FUNCTIES (ALLEEN VOOR EIGENAREN)**
-
-        *   **Owner Dashboard**: Een speciaal dashboard dat een overzicht geeft van de prestaties van de gehele organisatie, inclusief alle filialen.
-        *   **Mijn Organisatie**: Hier kunt u filialen aanmaken, beheren en verwijderen. U heeft een overzicht van alle managers en het totale aantal medewerkers per filiaal.
-        *   **Facturatie & Abonnement**:
-            1. Ga naar de 'Facturatie' pagina in het menu.
-            2. Hier ziet u een overzicht van uw huidige abonnement, het aantal licenties en uw factuurgeschiedenis.
-            3. Om **meer licenties aan te vragen**, klikt u op de knop 'Extra Licenties Kopen'.
-            4. Er verschijnt een venster waar u het aantal kunt specificeren en de aanvraag kunt indienen.
-
-        --- EINDE KENNISBANK ---
-
-        Uw regels:
-        1.  **Wees Stapsgewijs**: Geef bij de vraag hoe iets te doen, genummerde stappen. Wees zeer expliciet en gebruik de informatie uit de Kennisbank.
-        2.  **Blijf bij het Onderwerp**: Beantwoord geen vragen die niets te maken hebben met de Sales Copilot-applicatie. Weiger beleefd en stuur het gesprek terug.
-        3.  **Wees Formeel**: Gebruik altijd de formele toon die past bij de doeltaal (${targetLanguage}).
-        4.  **Geen Technisch Jargon**: Leg alles uit vanuit het perspectief van een gebruiker.
-        5.  **Begin het gesprek**: Uw eerste bericht moet altijd een formele begroeting zijn in de taal ${targetLanguage}, bijvoorbeeld: "Goedendag. Hoe kan ik u vandaag assisteren met de Sales Copilot applicatie?"
-    `;
-
-    try {
-        const chat: Chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
-            config: {
-                systemInstruction: systemInstruction,
-            },
-        });
-        return chat;
-    } catch (error) {
-        console.error("Error starting help chat:", error);
-        throw new Error("Kon de Help Chatbot niet starten.");
-    }
-};
-
-
-export const generatePreCallBriefing = async (user: User, client: Client, lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const prompt = `
-    Genereer een beknopte, actiegerichte "Pre-Call Briefing" voor een ${user.salesChannel} verkoper van ${user.company} (${user.industry}).
-    De briefing is voor een gesprek met ${client.name} van ${client.company}. De output moet in ${targetLanguage} zijn.
-
-    Gebruik twee informatiebronnen:
-    1.  De interne notities van de verkoper.
-    2.  Actuele, openbare informatie over het bedrijf "${client.company}" via Google Search.
-
-    De output moet in Markdown zijn en de volgende structuur hebben:
-
-    ### 1. Gesprekscontext
-    - **Klant:** ${client.name}
-    - **Bedrijf:** ${client.company}
-    - **Type Gesprek:** ${user.salesChannel === 'telefonisch' ? 'Telefoongesprek' : 'Fysieke afspraak'}
-
-    ### 2. Samenvatting Vorige Contacten
-    Vat de belangrijkste punten uit de notities hieronder samen. Wat is de status? Waar is eerder over gesproken?
-
-    ### 3. Actuele Inzichten (via Google Search)
-    Zoek naar recent nieuws, persberichten of belangrijke ontwikkelingen bij ${client.company}. Zijn er nieuwe projecten, uitdagingen of successen waar we op kunnen inspelen? Presenteer 2-3 opvallende punten.
-
-    ### 4. Strategische Gespreksdoelen
-    - **Primair Doel:** [Formuleer het belangrijkste doel voor dit gesprek]
-    - **Secundair Doel:** [Formuleer een 'nice-to-have' doel]
-
-    ### 5. Mogelijke Inhaakmomenten & Vragen
-    - [Stel 1-2 slimme, open vragen voor op basis van de notities en de actuele inzichten]
-    - [Geef 1 suggestie voor een persoonlijke ijsbreker of een relevant inhaakmoment]
-
-    --- INTERNE NOTITIES ---
-    ${client.notes}
-    --- EINDE NOTITIES ---
-    `;
-    
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                tools: [{ googleSearch: {} }],
-            },
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error generating pre-call briefing:", error);
-        return "Kon geen briefing genereren. Controleer de verbinding en probeer het opnieuw.";
-    }
-};
-
-export const generateFollowUpEmail = async (user: User, analysis: string, goal: 'afspraak bevestigen' | 'offerte nasturen' | 'bedanken voor gesprek', lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const prompt = `
-    You are an AI Email Assistant for a salesperson.
-    Draft a professional, concise follow-up email in ${targetLanguage}.
-
-    **Salesperson's Context:**
-    - Name: ${user.name}
-    - Company: ${user.company}
-    - Role: ${user.salesChannel} salesperson in the ${user.industry} sector.
-
-    **Goal of the email:** ${goal}
-
-    **Basis for the email (summary & action points from the conversation):**
-    ---
-    ${analysis}
-    ---
-
-    **Instructions:**
-    - Use the information from the summary and action points to write the email body.
-    - The tone should be professional, friendly, and action-oriented.
-    - Keep it short and scannable. Use line breaks.
-    - Start with a suitable salutation (e.g., "Beste [Klantnaam],").
-    - End with a professional closing and the salesperson's name.
-    - Ensure the email clearly states the next step, in line with the chosen goal.
-    - Use placeholders like [Klantnaam] where necessary.
-    `;
-    
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error generating follow-up email:", error);
-        return "Kon geen e-mail genereren. Probeer het opnieuw.";
-    }
-};
-
-export const generateWeeklyReview = async (user: User, goals: Goal[], clients: Client[], pitches: Pitch[], lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const sales = user.sales || [];
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const salesToday = sales.filter(s => new Date(s.date) >= startOfToday).reduce((sum, s) => sum + s.value, 0);
-
-    const dayOfWeek = now.getDay(); 
-    const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const startOfWeek = new Date(startOfToday);
-    startOfWeek.setDate(startOfToday.getDate() - diff);
-    const salesThisWeek = sales.filter(s => new Date(s.date) >= startOfWeek).reduce((sum, s) => sum + s.value, 0);
-    
-    const dailyGoals = goals.filter(g => g.type === 'daily');
-    const weeklyGoals = goals.filter(g => g.type === 'weekly');
-    
-    const goalsSummary = {
-        daily: {
-            total: dailyGoals.length,
-            completed: dailyGoals.filter(g => salesToday >= g.target).length
-        },
-        weekly: {
-            total: weeklyGoals.length,
-            completed: weeklyGoals.filter(g => salesThisWeek >= g.target).length
-        }
-    };
-
-    const prompt = `
-    You are a motivational AI Performance Coach for a salesperson named ${user.name}.
-    Analyze the performance data from the past week and provide a short, personal "Week in Review" in Markdown, written in ${targetLanguage}.
-    The tone should be positive, constructive, and motivational. Address the salesperson directly.
-
-    **Data from the week:**
-    - New clients added: ${clients.length}
-    - New pitches saved: ${pitches.length}
-    - Daily goals: ${goalsSummary.daily.completed} of ${goalsSummary.daily.total} achieved.
-    - Weekly goals: ${goalsSummary.weekly.completed} of ${goalsSummary.weekly.total} achieved.
-    - Salesperson context: Works at ${user.company} in the ${user.industry} as a ${user.salesChannel} salesperson.
-
-    **Structure of the review:**
-    1.  **A Positive Opening:** Start with a compliment or a positive observation about the week.
-    2.  **Highlight of the Week:** Mention one specific, positive point. For example, the high number of goals achieved, or the fact that many new clients were added.
-    3.  **An Insight or Tip:** Based on the data, provide one concrete, small, and easily actionable piece of advice for the coming week. For example: "It's noticeable that you're saving many pitches. Next week, try practicing one of them with the Pitch Coach." or "You've almost hit all your daily goals. For next week, try setting one extra, challenging goal."
-    4.  **A Motivational Closing:** End with a short, energetic sentence to start the new week well.
-
-    Keep the entire text short and inspiring (about 4-5 sentences total).
-    `;
-    
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error generating weekly review:", error);
-        return "Kon geen wekelijkse review genereren.";
-    }
-};
-
-export const generateTeamPerformanceAnalysis = async (teamData: { name: string, sales: Sale[] }[], lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const prompt = `
-    You are an experienced AI Sales Manager. Analyze the sales data of the team below. The most important KPI is the **total value of contracts sold**. Each sale object has a 'value' field that indicates how much a contract is worth (e.g., 1.0, 0.5).
-
-    Provide a detailed, constructive analysis in ${targetLanguage} and in Markdown.
-    Address the team leader directly.
-
-    **Structure of the Analysis:**
-    ### 1. Algemene Teamprestaties
-    - Summarize the overall performance of the team. What is the **total value** of the contracts sold? Is an upward or downward trend visible?
-
-    ### 2. Top-presteerders
-    - Identify the 1-2 best-performing team members based on the **total contract value**. Mention their successes and what makes them successful (e.g., consistency, high volume, selling valuable contracts).
-
-    ### 3. Coaching Mogelijkheden
-    - Identify team members who may need extra support based on a lower **total contract value**.
-    - Be empathetic and constructive. Avoid negative language. Focus on potential.
-
-    ### 4. Concreet Actieplan voor de Teamleider
-    - Provide 2-3 concrete, actionable coaching tips aimed at increasing the **total contract value**. Link each tip to a specific team member.
-    - Example advice: "Schedule a 1-on-1 meeting with [Name] to discuss their approach and see how you can increase the value per sale together." or "Organize a session where [Top Performer] shares their method with the rest of the team."
-
-    **Team Information and Sales Data (focus on the sum of 'value'):**
-    ---
-    ${JSON.stringify(teamData, null, 2)}
-    ---
-    `;
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error generating team performance analysis:", error);
-        return "Kon de team prestatieanalyse niet genereren.";
-    }
-};
-
-export const generateDailyTip = async (user: User, goals: Goal[], sales: Sale[], lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const dayOfWeek = now.getDay();
-    const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const startOfWeek = new Date(startOfToday);
-    startOfWeek.setDate(startOfToday.getDate() - diff);
-    const salesThisWeek = sales.filter(s => new Date(s.date) >= startOfWeek).reduce((sum, s) => sum + s.value, 0);
-
-    const openWeeklyGoals = goals.filter(g => g.type === 'weekly' && salesThisWeek < g.target);
-    const recentSalesValue = sales.filter(s => {
-        const saleDate = new Date(s.date);
-        const threeDaysAgo = new Date();
-        threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-        return saleDate > threeDaysAgo;
-    }).reduce((sum, s) => sum + s.value, 0);
-
-    const context = `
-    - Salesperson name: ${user.name}
-    - Role: ${user.role}
-    - Open weekly goals: ${openWeeklyGoals.length}
-    - Total sales value last 3 days: ${recentSalesValue}
-    `;
-
-    const prompt = `
-    You are an AI Sales Coach. Generate one short, motivational, and context-aware "Tip of the Day" for the salesperson.
-    The tip must be in ${targetLanguage}, a maximum of 2-3 sentences long, and written directly and personally.
-
-    Use the following context to generate a relevant tip:
-    ${context}
-
-    **Example scenarios:**
-    - If there are still open weekly goals: "Good morning! You still have ${openWeeklyGoals.length} weekly goals open. Let's tackle one today to end the week strong!"
-    - If there have been few recent sales: "It's been a bit quiet. A perfect moment to practice one of your top pitches with the AI Coach and prepare for the next opportunity."
-    - If there's a new feature (like Team Knowledge Base): "Did you know your team leader can share 'Golden Pitches' in the Team Knowledge Base? A great source for inspiration!"
-    - A general motivational tip: "Every 'no' brings you closer to a 'yes'. Stay focused and positive today!"
-
-    Now generate a suitable, original tip.
-    `;
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error generating daily tip:", error);
-        return "Begin de dag sterk en focus op je doelen!";
-    }
-};
-
-export const generateMotivationPostInspiration = async (topic: string, lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const prompt = `
-    You are a motivational speaker for sales teams.
-    Write a short, powerful, and inspiring paragraph based on the following topic.
-    The response must be in ${targetLanguage}.
-
-    Topic: "${topic}"
-    `;
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error generating motivation post inspiration:", error);
-        return "";
-    }
-};
-
-export const generateSalesPlan = async (user: User, topic: string, lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const prompt = `
-    You are a senior sales manager for ${user.company}, a company active in the ${user.industry} sector using a '${user.salesChannel}' sales channel.
-    Your task is to create a practical, step-by-step training plan in Markdown, written in ${targetLanguage}.
-    The plan is for a manager to train their sales team, which sells ${user.industry} products/services.
-    The output should be highly relevant to this specific business context. Do NOT mention the name "SalExplosive".
-
-    The topic for the training is: "${topic}".
-
-    Structure the training plan with the following components:
-    - **Learning Objectives:** What will the team be able to do after this training? (3 bullet points, tailored to ${user.industry} sales)
-    - **Session 1: Theory (30 mins):** Key concepts and principles, with examples from the ${user.industry} market.
-    - **Session 2: Practical Exercise / Role-play (45 mins):** A concrete exercise the team can do, simulating a realistic '${user.salesChannel}' scenario for ${user.industry} products.
-    - **Session 3: Feedback & Follow-up (15 mins):** How to provide feedback and measure success in this specific sales environment.
-    `;
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-pro',
-            contents: prompt,
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error generating sales plan:", error);
-        return "Kon geen trainingsplan genereren.";
-    }
-};
-
-export const summarizeAgendaForManager = async (appointments: Appointment[], lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const appointmentList = appointments.map(a => `- ${a.time}: ${a.title} ${a.notes ? `(${a.notes})` : ''}`).join('\n');
-    const prompt = `
-    You are an AI assistant for a busy sales manager. Summarize the following agenda for today.
-    Identify the most important appointment and provide one strategic tip.
-    The output must be in ${targetLanguage} and very concise.
-
-    Agenda:
-    ${appointmentList}
-
-    Example output:
-    "You have ${appointments.length} appointments today. The most important one seems to be with [Client Name]. Tip: Focus on confirming the budget during this call."
-    `;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error summarizing agenda:", error);
-        return "Kon de agenda niet samenvatten.";
-    }
-};
-
-
-export const generateClientProfile = async (notes: string, lang: string = 'nl'): Promise<string> => {
-    const targetLanguage = langMap[lang] || 'Dutch';
-    const prompt = `
-    Analyze the following notes about a client and generate a "Client Persona" profile.
-    This helps the salesperson to better understand and connect with the client.
-    The output must be in ${targetLanguage} and in Markdown.
-
-    Structure the profile with these headings:
-    ### Persoonlijkheidstype
-    (e.g., Analytisch, Relatiegericht, Besluitvaardig, Expressief)
-
-    ### Belangrijkste Drijfveren
-    (What does this client value most? e.g., Prijs, Kwaliteit, Service, Innovatie, Zekerheid)
-
-    ### Communicatiestijl
-    (How should you communicate with this person? e.g., Formeel, To-the-point, Sociaal, Gedetailleerd)
-    
-    --- NOTES ---
-    ${notes}
-    --- END NOTES ---
-    `;
-     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error generating client profile:", error);
-        return "Kon geen klantprofiel genereren.";
+        throw new Error("Failed to start advice chat.");
     }
 };
