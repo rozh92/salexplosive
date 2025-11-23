@@ -3,31 +3,29 @@ import { useAuth } from '../context/AuthContext';
 import { useTranslation } from '../context/TranslationContext';
 
 const LoginPage: React.FC = () => {
-    const { login, resetPassword, error: contextError } = useAuth();
+    const { login, resetPassword } = useAuth();
     const { t } = useTranslation();
-    const [formError, setFormError] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [message, setMessage] = useState('');
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
 
-    const displayError = contextError || formError;
-
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        setFormError(null);
+        setError(null);
         setMessage('');
         setIsLoading(true);
         try {
             await login(email, password);
         } catch (err: any) {
             if (err.name === 'PendingApproval') {
-                setFormError(t('login_error_pending'));
+                setError(t('login_error_pending'));
             } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-                 setFormError(t('login_error_credentials'));
+                 setError(t('login_error_credentials'));
             } else {
-                 setFormError(t('login_error_generic'));
+                 setError(t('login_error_generic'));
             }
         } finally {
             setIsLoading(false);
@@ -36,10 +34,10 @@ const LoginPage: React.FC = () => {
     
     const handlePasswordReset = async () => {
         if (!email) {
-            setFormError(t('error_email_format'));
+            setError(t('error_email_format'));
             return;
         }
-        setFormError(null);
+        setError(null);
         setMessage('');
         setIsLoading(true);
         try {
@@ -47,9 +45,9 @@ const LoginPage: React.FC = () => {
             setMessage(t('password_reset_sent'));
         } catch (err: any) {
              if (err.code === 'auth/user-not-found') {
-                setFormError(t('password_reset_not_found'));
+                setError(t('password_reset_not_found'));
             } else {
-                setFormError(t('password_reset_error'));
+                setError(t('password_reset_error'));
             }
         } finally {
             setIsLoading(false);
@@ -86,7 +84,7 @@ const LoginPage: React.FC = () => {
                         </div>
                         <input id="password-login" type="password" value={password} onChange={e => setPassword(e.target.value)} required className={inputStyle} />
                     </div>
-                    {displayError && <p className="text-red-500 text-sm text-center">{displayError}</p>}
+                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
                     {message && <p className="text-green-500 text-sm text-center">{message}</p>}
                     <div className="pt-2">
                         <button type="submit" disabled={isLoading} className="w-full bg-brand-primary text-white font-bold py-3 px-4 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50">
@@ -98,6 +96,16 @@ const LoginPage: React.FC = () => {
                     <a href="/#/register" className="text-sm text-brand-primary hover:underline">
                         {t('no_account_yet')} {t('register_company')}
                     </a>
+                </div>
+
+                {/* Anti-Phishing Footer: Cruciaal om suspension te voorkomen */}
+                <div className="mt-8 border-t border-brand-border pt-4 text-center text-xs text-brand-text-secondary">
+                  <div className="flex justify-center space-x-4">
+                    <a href="/#/privacy" className="hover:text-brand-primary transition-colors">Privacybeleid</a>
+                    <a href="/#/terms" className="hover:text-brand-primary transition-colors">Algemene Voorwaarden</a>
+                    <a href="/#/contact" className="hover:text-brand-primary transition-colors">Contact</a>
+                  </div>
+                  <p className="mt-2">&copy; {new Date().getFullYear()} SalExplosive. Alle rechten voorbehouden.</p>
                 </div>
             </div>
         </div>
