@@ -7,12 +7,13 @@ import { getStorage } from "firebase/storage";
 // TODO: Vervang dit object met de firebaseConfig die u uit uw Firebase projectinstellingen heeft gekopieerd.
 // Dit is de 'digitale sleutel' die uw webapp verbindt met uw Firebase backend.
 export const firebaseConfig = {
-  apiKey: "AIzaSyAE4wy4bIbhrKSQeFH6cN6DVu1jOrtpY04",
-  authDomain: "sales-copilot-fad44.firebaseapp.com",
-  projectId: "sales-copilot-fad44",
-  storageBucket: "sales-copilot-fad44.firebasestorage.app",
-  messagingSenderId: "166925960707",
-  appId: "1:166925960707:web:b38d24841c679bb453f036"
+  apiKey: "AIzaSyBYgPPPg83xwrguxEZbxbnP_2QwEET8los",
+  authDomain: "salexplosive.firebaseapp.com",
+  projectId: "salexplosive",
+  storageBucket: "salexplosive.firebasestorage.app",
+  messagingSenderId: "642364074756",
+  appId: "1:642364074756:web:b787af9924dc4626b6be51",
+  measurementId: "G-SL43JRJE0V"
 };
 
 // Initialiseer de Firebase app
