@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /#/login
+Disallow: /#/register
+Disallow: /private/
+
+Sitemap: https://www.salexplosive.com/sitemap.xml
