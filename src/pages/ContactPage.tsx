@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { EnvelopeIcon, PhoneIcon, BuildingStorefrontIcon, BriefcaseIcon } from '../components/icons/Icons';
 import PublicHeader from '../components/PublicHeader';
 import { useTranslation } from '../context/TranslationContext';
-import PublicFooter from '../components/PublicFooter'; // Belangrijke import
 
 const ContactPage: React.FC = () => {
     const { t } = useTranslation();
@@ -33,9 +32,9 @@ const ContactPage: React.FC = () => {
     };
 
     return (
-        <div className="bg-brand-background min-h-screen flex flex-col">
+        <div className="bg-brand-background min-h-screen">
             <PublicHeader />
-            <main className="flex-grow max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16 w-full">
+            <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
                 <div className="bg-brand-surface p-8 sm:p-12 rounded-xl shadow-lg">
                     <div className="text-center mb-12">
                         <div className="inline-block p-4 bg-brand-primary/10 rounded-full">
@@ -61,14 +60,14 @@ const ContactPage: React.FC = () => {
                                         <PhoneIcon className="w-6 h-6 mr-4 mt-1 text-brand-primary"/>
                                         <div>
                                             <h3 className="font-semibold">{t('contact_phone_label')}</h3>
-                                            <p className="text-brand-text-secondary">{t('contact_phone_value')}</p>
+                                            <p className="text-brand-text-secondary">+31685137375</p>
                                         </div>
                                     </div>
                                     <div className="flex items-start">
                                         <BuildingStorefrontIcon className="w-6 h-6 mr-4 mt-1 text-brand-primary"/>
                                         <div>
                                             <h3 className="font-semibold">{t('contact_address_label')}</h3>
-                                            <p className="text-brand-text-secondary">{t('contact_address_value')}</p>
+                                            <p className="text-brand-text-secondary">Ringelwikke 8, 5931SC te Tegelen</p>
                                         </div>
                                     </div>
                                     <div className="flex items-start">
@@ -120,7 +119,25 @@ const ContactPage: React.FC = () => {
                     </div>
                 </div>
             </main>
-            <PublicFooter />
+             <footer className="bg-brand-secondary">
+                <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+                <div className="flex justify-center items-center space-x-4">
+                    <p className="text-center text-base text-brand-text-secondary">{t('footer_copyright', { year: new Date().getFullYear() })}</p>
+                     <span className="text-brand-text-secondary">|</span>
+                     <a href="/#/contact" className="text-base text-brand-text-secondary hover:text-brand-primary underline">
+                        {t('footer_contact')}
+                    </a>
+                    <span className="text-brand-text-secondary">|</span>
+                    <a href="/#/privacy" className="text-base text-brand-text-secondary hover:text-brand-primary underline">
+                        {t('footer_privacy')}
+                    </a>
+                    <span className="text-brand-text-secondary">|</span>
+                    <a href="/#/terms" className="text-base text-brand-text-secondary hover:text-brand-primary underline">
+                        {t('footer_terms')}
+                    </a>
+                </div>
+                </div>
+            </footer>
         </div>
     );
 };
