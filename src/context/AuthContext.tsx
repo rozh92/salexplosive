@@ -1,28 +1,31 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, Sale, Pitch, KnowledgeBasePitch, Client, Goal, MotivationPost, CompetitorNote, Planning, Appointment, ProductPackage, MarketIntelligenceNote, Invoice, TrainingResult } from '../types';
-import { auth, db, firebaseConfig } from '../firebase/config';
+import { auth, db, firebaseConfig, app } from '../firebase/config';
 import { 
     createUserWithEmailAndPassword, 
     signInWithEmailAndPassword, 
     signOut, 
     onAuthStateChanged,
     updatePassword,
-    sendPasswordResetEmail,
     getAuth,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, deleteDoc, writeBatch, arrayUnion, onSnapshot, Unsubscribe } from 'firebase/firestore';
+// --- AANGEPAST: 'or' toegevoegd aan imports ---
+import { doc, setDoc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, deleteDoc, writeBatch, arrayUnion, onSnapshot, Unsubscribe, or } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { checkAndAwardBadges } from '../utils/gamification';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getSalesValueForPeriod } from '../utils/salesUtils';
 
 // Secondary Firebase app for user creation without automatic login
-const secondaryApp = initializeApp(firebaseConfig, "secondaryApp");
+const secondaryApp = !getApps().some(a => a.name === "secondaryApp") 
+    ? initializeApp(firebaseConfig, "secondaryApp") 
+    : getApp("secondaryApp");
 const secondaryAuth = getAuth(secondaryApp);
 
 interface AuthContextType {
     user: User | null;
-    users: User[]; // Users in the same branch
-    allUsers: User[]; // All users in the company
+    users: User[]; 
+    allUsers: User[]; 
     loading: boolean;
     error: string | null;
     pitches: Pitch[];
@@ -41,7 +44,7 @@ interface AuthContextType {
     logout: () => Promise<void>;
     updateUser: (updatedData: Partial<User>) => Promise<void>;
     addTeamMember: (memberData: Omit<User, 'role' | 'teamMembers' | 'sales' | 'forcePasswordChange' | 'profilePicture' | 'badges' | 'totalSalesToday' | 'totalSalesWeek' | 'totalSalesMonth'>, role: UserRole) => Promise<void>;
-    createBranchAndManager: (branchName: string, managerData: Omit<User, 'role' | 'teamMembers' | 'sales' | 'forcePasswordChange' | 'profilePicture' | 'badges' | 'totalSalesToday' | 'totalSalesWeek' | 'totalSalesMonth' | 'branchName' | 'company'>) => Promise<void>;
+    createBranchAndManager: (branchName: string, managerData: Omit<User, 'role' | 'teamMembers' | 'sales' | 'forcePasswordChange' | 'profilePicture' | 'badges' | 'totalSalesToday' | 'totalSalesWeek' | 'totalSalesMonth' | 'branchName' | 'company' | 'industry' | 'salesChannel'>, purchasedLicenses: number) => Promise<void>;
     updateBranchDetails: (originalBranchName: string, newBranchName: string, newManagerEmail?: string) => Promise<void>;
     logSale: (pkg: ProductPackage) => Promise<void>;
     changePassword: (newPassword: string) => Promise<void>;
@@ -109,7 +112,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     useEffect(() => {
         const authUnsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-            cleanupListeners(); // Clear listeners for previous user
+            cleanupListeners(); 
 
             if (firebaseUser) {
                 setLoading(true);
@@ -118,24 +121,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 let innerListeners: Unsubscribe[] = [];
 
                 const userUnsubscribe = onSnapshot(userDocRef, (userDocSnap) => {
-                    // Clean up sub-listeners to avoid leaks on user doc update
                     innerListeners.forEach(unsub => unsub());
                     innerListeners = [];
 
                     if (userDocSnap.exists()) {
                         const userData = userDocSnap.data() as User;
     
-                        const isOwnerWithPendingStatus = userData.role === 'owner' && userData.status === 'pending';
-
-                        // Allow owner to proceed even if pending, but deny others.
-                        if (userData.status === 'pending' && userData.role !== 'owner') {
+                        if (userData.status === 'pending') {
                             signOut(auth);
                             setUser(null);
                             setLoading(false);
                             return;
                         }
 
-                        // Real-time listener for sales
                         const salesUnsubscribe = onSnapshot(collection(db, 'users', firebaseUser.uid, 'sales'), (salesSnap) => {
                             const sales = salesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
                              const fullUserData: User = {
@@ -146,7 +144,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             };
                             setUser(fullUserData);
 
-                            // Badge logic is now handled by the user doc listener based on sales data.
                             const newBadges = checkAndAwardBadges(sales.reduce((acc, s) => acc + s.value, 0), userData.badges || []);
                             if (JSON.stringify(newBadges) !== JSON.stringify(userData.badges)) {
                                 updateDoc(userDocRef, { badges: newBadges });
@@ -190,9 +187,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                                 }));
                             });
 
+                            // --- AANGEPAST: 'appointments' verwijderd uit deze lijst, want die heeft nu speciale logica ---
                             const userSubCollections: Record<string, React.Dispatch<any>> = {
                                 pitches: setPitches, clients: setClients, goals: setGoals,
-                                plannings: setPlannings, appointments: setAppointments
+                                plannings: setPlannings
                             };
                             Object.keys(userSubCollections).forEach(col => {
                                 innerListeners.push(onSnapshot(collection(db, 'users', firebaseUser.uid, col), (snapshot) => {
@@ -203,6 +201,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                                     userSubCollections[col](data);
                                 }));
                             });
+
+                            // --- AANGEPAST: Nieuwe listener voor APPOINTMENTS ---
+                            // Deze zoekt in de HOOFDCOLLECTIE 'appointments' naar items waar:
+                            // 1. Jij de eigenaar bent (ownerId == jouw ID)
+                            // 2. OF waar jij getagd bent (taggedUsers bevat jouw ID)
+                            const appointmentsQuery = query(
+                                collection(db, 'appointments'),
+                                or(
+                                    where('ownerId', '==', firebaseUser.uid),
+                                    where('taggedUsers', 'array-contains', firebaseUser.uid)
+                                )
+                            );
+                            
+                            innerListeners.push(onSnapshot(appointmentsQuery, (snapshot) => {
+                                const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                                // Sorteren op datum/tijd (optioneel, maar handig)
+                                // data.sort((a: any, b: any) => ... ); 
+                                setAppointments(data as Appointment[]);
+                            }));
+
                             
                             if(userData.role === 'owner'){
                                 innerListeners.push(onSnapshot(query(collection(db, 'invoices'), where('companyId', '==', companyId)), (snapshot) => {
@@ -220,13 +238,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     setLoading(false);
                 }, (error) => {
                     console.error("Error listening to user document:", error);
-                    if (error.code === 'permission-denied') {
-                        console.warn("Permission denied error detected after login. Forcing logout to clear session.");
-                        signOut(auth);
-                        setError("Uw sessie is verlopen of ongeldig door een permissieprobleem. Log alstublieft opnieuw in.");
-                    } else {
-                        setError("Kon gebruikersgegevens niet laden. Probeer het later opnieuw.");
-                    }
+                    setError("Kon gebruikersgegevens niet live bijwerken.");
                     setLoading(false);
                 });
                 setActiveListeners([userUnsubscribe, () => innerListeners.forEach(unsub => unsub())]);
@@ -247,7 +259,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         const userDocRef = doc(db, 'users', userCredential.user.uid);
         const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists() && userDocSnap.data().status === 'pending' && userDocSnap.data().role !== 'owner') {
+        if (userDocSnap.exists() && userDocSnap.data().status === 'pending') {
             await signOut(auth);
             const pendingError = new Error("Account is in afwachting van goedkeuring.");
             pendingError.name = "PendingApproval";
@@ -267,7 +279,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const newManager: User = {
             name: restData.name || '',
-            email: firebaseUser.email || '',
+            email: firebaseUser.email || '', 
             industry: restData.industry || 'telecom',
             company: restData.companyName || '',
             branchName: restData.companyName || '',
@@ -282,7 +294,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await signOut(secondaryAuth);
     };
     
-    const createBranchAndManager = async (branchName: string, managerData: Omit<User, 'role' | 'teamMembers' | 'sales' | 'forcePasswordChange' | 'profilePicture' | 'badges' | 'totalSalesToday' | 'totalSalesWeek' | 'totalSalesMonth' | 'branchName' | 'company'>) => {
+    const createBranchAndManager = async (branchName: string, managerData: Omit<User, 'role' | 'teamMembers' | 'sales' | 'forcePasswordChange' | 'profilePicture' | 'badges' | 'totalSalesToday' | 'totalSalesWeek' | 'totalSalesMonth' | 'branchName' | 'company' | 'industry' | 'salesChannel'>, purchasedLicenses: number) => {
         if (!user || user.role !== 'owner' || !user.companyId) throw new Error("Permission denied");
         
         const { email, password, ...restData } = managerData;
@@ -294,14 +306,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const newManagerRef = doc(db, 'users', firebaseUser.uid);
         const newManager: Partial<User> = {
             ...restData,
-            email: firebaseUser.email,
+            email: firebaseUser.email || '', 
             role: 'manager',
             branchName,
             company: user.company,
+            industry: user.industry,
+            salesChannel: user.salesChannel,
             companyId: user.companyId,
             forcePasswordChange: true,
             lang: user.lang,
-            purchasedLicenses: 1,
+            // FIX: Ensure purchasedLicenses has a fallback value to prevent 'undefined' error in Firestore
+            purchasedLicenses: purchasedLicenses || 1,
         };
         await setDoc(newManagerRef, newManager);
 
@@ -396,7 +411,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     };
     
-    const resetPassword = (email: string) => sendPasswordResetEmail(auth, email);
+    const resetPassword = async (email: string) => {
+        const functions = getFunctions(app, 'europe-west3'); 
+        const requestPasswordResetFn = httpsCallable(functions, 'requestPasswordReset');
+        await requestPasswordResetFn({ email });
+    };
 
     const createCrudFunctions = <T extends {id: string}>(collectionName: string, isSubCollection = false) => {
         const getColRef = () => isSubCollection && auth.currentUser
@@ -405,13 +424,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const add = async (data: Omit<T, 'id'>): Promise<T> => {
             if (!user || !user.companyId || !auth.currentUser) throw new Error("Not authenticated");
-            const dataWithCompanyId = { ...data, companyId: user.companyId, createdAt: new Date().toISOString() };
+            // --- AANGEPAST: ownerId toegevoegd aan elk document voor identificatie ---
+            const dataWithCompanyId = { 
+                ...data, 
+                companyId: user.companyId, 
+                ownerId: auth.currentUser.uid, // Belangrijk voor filtering!
+                createdAt: new Date().toISOString() 
+            };
             const colRef = getColRef();
             if (!colRef) throw new Error("Could not create collection reference.");
             const docRef = await addDoc(colRef, dataWithCompanyId);
             return { id: docRef.id, ...dataWithCompanyId } as unknown as T;
         };
         const update = async (updatedData: T) => {
+            // Check if updates are needed in root or subcollection
             const docPath = isSubCollection && auth.currentUser ? `users/${auth.currentUser.uid}/${collectionName}` : collectionName;
             const docRef = doc(db, docPath, updatedData.id);
             await updateDoc(docRef, updatedData as { [x: string]: any });
@@ -428,7 +454,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const { add: addClient, update: updateClient, remove: deleteClient } = createCrudFunctions<Client>('clients', true);
     const { remove: deleteGoal } = createCrudFunctions<Goal>('goals', true);
     const { add: addPlanning, remove: deletePlanning } = createCrudFunctions<Planning>('plannings', true);
-    const { add: addAppointment, update: updateAppointment, remove: deleteAppointment } = createCrudFunctions<Appointment>('appointments', true);
+    
+    // --- AANGEPAST: Appointments staan nu op 'false' (hoofdcollectie) ---
+    const { add: addAppointment, update: updateAppointment, remove: deleteAppointment } = createCrudFunctions<Appointment>('appointments', false);
 
     const addGoal = async (goalData: Omit<Goal, 'id' | 'goalType'>): Promise<Goal> => {
         if (!user || !auth.currentUser) throw new Error("Not authenticated");

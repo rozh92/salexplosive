@@ -1,25 +1,38 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { generateSalesPlan } from '../services/geminiService';
-import { Appointment, Planning } from '../types';
+// AANGEPAST: We gebruiken 'as PlanningData' om het naamconflict met de component 'Planning' op te lossen.
+// We voegen 'type' toe omdat isolatedModules: true aan staat in je tsconfig.
+import type { Appointment, Planning as PlanningData } from '../types';
 import { CalendarDaysIcon, PlusIcon, SparklesIcon, TrashIcon } from '../components/icons/Icons';
 import Markdown from 'react-markdown';
 import { useTranslation } from '../context/TranslationContext';
 
 const Planning: React.FC = () => {
-    const { user, plannings, appointments, addPlanning, deletePlanning, addAppointment, updateAppointment, deleteAppointment } = useAuth();
+    // We halen allUsers op voor de Manager lijst
+    const { user, allUsers, plannings, appointments, addPlanning, deletePlanning, addAppointment, updateAppointment, deleteAppointment } = useAuth();
     const { t, language } = useTranslation();
     
     // State for planning
     const [planTopic, setPlanTopic] = useState('');
-    const [generatedPlan, setGeneratedPlan] = useState<Omit<Planning, 'id'> | null>(null);
+    // AANGEPAST: Hier verwijzen we nu naar PlanningData
+    const [generatedPlan, setGeneratedPlan] = useState<Omit<PlanningData, 'id'> | null>(null);
     const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
-    const [selectedPlan, setSelectedPlan] = useState<Planning | null>(null);
+    // AANGEPAST: Hier verwijzen we nu naar PlanningData
+    const [selectedPlan, setSelectedPlan] = useState<PlanningData | null>(null);
 
     // State for appointments
     const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
     const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
-    const [appointmentForm, setAppointmentForm] = useState<Omit<Appointment, 'id'>>({ title: '', date: '', time: '', notes: '' });
+    
+    // State voor het formulier (inclusief taggedUsers)
+    const [appointmentForm, setAppointmentForm] = useState<Omit<Appointment, 'id'>>({ 
+        title: '', 
+        date: '', 
+        time: '', 
+        notes: '',
+        taggedUsers: [] 
+    });
 
     const sortedAppointments = useMemo(() => {
         return [...appointments].sort((a, b) => {
@@ -28,6 +41,12 @@ const Planning: React.FC = () => {
             return dateA.getTime() - dateB.getTime();
         });
     }, [appointments]);
+
+    // Filter de managers uit de gebruikerslijst (zodat Owner ze kan kiezen)
+    const availableManagers = useMemo(() => {
+        if (!allUsers) return [];
+        return allUsers.filter(u => u.role === 'manager' && u.uid !== user?.uid); 
+    }, [allUsers, user]);
 
     const handleGeneratePlan = async () => {
         if (!planTopic || !user) return;
@@ -50,29 +69,62 @@ const Planning: React.FC = () => {
         setPlanTopic('');
     };
     
+    // Algemene handler voor tekstvelden
     const handleAppointmentFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
         setAppointmentForm(prev => ({ ...prev, [name]: value }));
     };
 
+    // Specifieke handler voor de Manager Select dropdown
+    const handleManagerSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const value = e.target.value;
+        setAppointmentForm(prev => ({
+            ...prev,
+            taggedUsers: value ? [value] : [] 
+        }));
+    };
+
     const handleAppointmentSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (editingAppointment) {
-            await updateAppointment({ ...editingAppointment, ...appointmentForm });
-        } else {
-            await addAppointment(appointmentForm);
+        
+        const appointmentData = {
+            ...appointmentForm,
+            taggedUsers: appointmentForm.taggedUsers || []
+        };
+
+        try {
+            if (editingAppointment) {
+                await updateAppointment({ ...editingAppointment, ...appointmentData });
+            } else {
+                await addAppointment(appointmentData);
+            }
+            setIsAppointmentModalOpen(false);
+            setEditingAppointment(null);
+        } catch (error) {
+            console.error("Fout bij opslaan afspraak:", error);
+            alert("Er ging iets mis bij het opslaan.");
         }
-        setIsAppointmentModalOpen(false);
-        setEditingAppointment(null);
     };
     
     const openAppointmentModal = (app: Appointment | null) => {
         if (app) {
             setEditingAppointment(app);
-            setAppointmentForm(app);
+            setAppointmentForm({
+                title: app.title,
+                date: app.date,
+                time: app.time,
+                notes: app.notes || '',
+                taggedUsers: app.taggedUsers || []
+            });
         } else {
             setEditingAppointment(null);
-            setAppointmentForm({ title: '', date: new Date().toISOString().split('T')[0], time: '', notes: '' });
+            setAppointmentForm({ 
+                title: '', 
+                date: new Date().toISOString().split('T')[0], 
+                time: '', 
+                notes: '', 
+                taggedUsers: [] 
+            });
         }
         setIsAppointmentModalOpen(true);
     };
@@ -134,6 +186,13 @@ const Planning: React.FC = () => {
                                     <p className="text-sm font-mono text-brand-primary">{new Date(app.date).toLocaleDateString()} @ {app.time}</p>
                                 </div>
                                 {app.notes && <p className="text-sm text-brand-text-secondary mt-1">{app.notes}</p>}
+                                
+                                {/* Laat zien als er iemand getagd is */}
+                                {app.taggedUsers && app.taggedUsers.length > 0 && (
+                                    <p className="text-xs text-brand-primary mt-1 font-semibold flex items-center">
+                                        <span className="mr-1">👥</span> Gedeeld met manager
+                                    </p>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -172,6 +231,28 @@ const Planning: React.FC = () => {
                                     <input id="time" name="time" type="time" value={appointmentForm.time} onChange={handleAppointmentFormChange} required className={inputStyle} />
                                 </div>
                              </div>
+                            
+                            {/* DROPDOWN VOOR MANAGERS (Alleen zichtbaar voor Owner) */}
+                            {user?.role === 'owner' && (
+                                <div>
+                                    <label htmlFor="taggedManager" className={labelStyle}>Tag een Manager (Optioneel)</label>
+                                    <select 
+                                        id="taggedManager" 
+                                        name="taggedManager" 
+                                        value={appointmentForm.taggedUsers?.[0] || ''} 
+                                        onChange={handleManagerSelect}
+                                        className={inputStyle}
+                                    >
+                                        <option value="">Geen manager selecteren</option>
+                                        {availableManagers.map(manager => (
+                                            <option key={manager.uid} value={manager.uid}>
+                                                {manager.name} ({manager.branchName || 'Geen filiaal'})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
                             <div>
                                 <label htmlFor="notes" className={labelStyle}>{t('notes_optional')}</label>
                                 <textarea id="notes" name="notes" value={appointmentForm.notes} onChange={handleAppointmentFormChange} rows={3} className={inputStyle + ' resize-none'}></textarea>

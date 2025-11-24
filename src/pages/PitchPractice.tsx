@@ -1,19 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { GoogleGenAI, LiveSession, LiveServerMessage, Modality, Blob } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, Blob } from '@google/genai';
 import { Pitch } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { ClipboardListIcon, MicrophoneIcon, AcademicCapIcon, SparklesIcon, PaperAirplaneIcon } from '../components/icons/Icons';
+import { ClipboardListIcon, MicrophoneIcon, AcademicCapIcon, PaperAirplaneIcon } from '../components/icons/Icons';
 import { encode, decode, decodeAudioData } from '../utils/audioUtils';
 import Markdown from 'react-markdown';
 import { useTranslation } from '../context/TranslationContext';
 
-const API_KEY = process.env.API_KEY;
+// @ts-ignore
+const API_KEY = import.meta.env.VITE_GOOGLE_AI_KEY || process.env.API_KEY;
 
-if (!API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+// Initialiseer met een dummy key als de echte ontbreekt om crash te voorkomen.
+const ai = new GoogleGenAI({ apiKey: API_KEY || 'DUMMY_KEY' });
 
 type Stage = 'select_pitch' | 'select_persona' | 'practice' | 'feedback';
 
@@ -31,7 +29,8 @@ const PitchPractice: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
 
     const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
-    const sessionPromiseRef = useRef<Promise<LiveSession> | null>(null);
+    // We gebruiken 'any' voor de sessie om TypeScript errors met de library types te voorkomen
+    const sessionPromiseRef = useRef<Promise<any> | null>(null);
     const inputAudioContextRef = useRef<AudioContext | null>(null);
     const outputAudioContextRef = useRef<AudioContext | null>(null);
     const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
@@ -66,7 +65,6 @@ const PitchPractice: React.FC = () => {
 
     useEffect(() => {
         return () => {
-            // Cleanup on component unmount
             stopPractice();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -83,6 +81,10 @@ const PitchPractice: React.FC = () => {
     };
 
     const startPractice = async () => {
+        if (!API_KEY) {
+            setError("API Key ontbreekt. Kan oefensessie niet starten.");
+            return;
+        }
         if (!selectedPersona) return;
         setIsPracticing(true);
         setError(null);
@@ -119,7 +121,7 @@ const PitchPractice: React.FC = () => {
                                 data: encode(new Uint8Array(new Int16Array(inputData.map(x => x * 32768)).buffer)),
                                 mimeType: 'audio/pcm;rate=16000',
                             };
-                            sessionPromiseRef.current?.then((session) => {
+                            sessionPromiseRef.current?.then((session: any) => {
                                 session.sendRealtimeInput({ media: pcmBlob });
                             });
                         };
@@ -127,30 +129,36 @@ const PitchPractice: React.FC = () => {
                         scriptProcessor.connect(inputAudioContextRef.current!.destination);
                     },
                     onmessage: async (message: LiveServerMessage) => {
+                        const serverContent = message.serverContent as any;
+
                         // Handle transcription
-                        if (message.serverContent?.inputTranscription) {
-                            const { text, finalized } = message.serverContent.inputTranscription;
-                            setTranscript(prev => {
+                        if (serverContent?.inputTranscription) {
+                            const { text } = serverContent.inputTranscription;
+                            setTranscript((prev: TranscriptEntry[]) => {
                                 const last = prev[prev.length - 1];
-                                if (last?.speaker === 'user' && !finalized) {
-                                    return [...prev.slice(0, -1), { speaker: 'user', text }];
+                                if (last?.speaker === 'user') {
+                                     const newTranscript = [...prev];
+                                     newTranscript[newTranscript.length - 1] = { speaker: 'user', text };
+                                     return newTranscript;
                                 }
                                 return [...prev, { speaker: 'user', text }];
                             });
                         }
-                        if (message.serverContent?.outputTranscription) {
-                            const { text, finalized } = message.serverContent.outputTranscription;
-                            setTranscript(prev => {
+                        if (serverContent?.outputTranscription) {
+                             const { text } = serverContent.outputTranscription;
+                             setTranscript((prev: TranscriptEntry[]) => {
                                 const last = prev[prev.length - 1];
-                                if (last?.speaker === 'model' && !finalized) {
-                                    return [...prev.slice(0, -1), { speaker: 'model', text }];
+                                if (last?.speaker === 'model') {
+                                    const newTranscript = [...prev];
+                                    newTranscript[newTranscript.length - 1] = { speaker: 'model', text };
+                                    return newTranscript;
                                 }
                                 return [...prev, { speaker: 'model', text }];
                             });
                         }
 
                         // Handle audio output
-                        const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData.data;
+                        const base64Audio = serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
                         if (base64Audio) {
                             nextStartTimeRef.current = Math.max(nextStartTimeRef.current, currentOutputAudioContext.currentTime);
                             const audioBuffer = await decodeAudioData(decode(base64Audio), currentOutputAudioContext, 24000, 1);
@@ -165,7 +173,7 @@ const PitchPractice: React.FC = () => {
                             audioSourcesRef.current.add(source);
                         }
 
-                        if (message.serverContent?.interrupted) {
+                        if (serverContent?.interrupted) {
                             for (const source of audioSourcesRef.current.values()) {
                                 source.stop();
                                 audioSourcesRef.current.delete(source);
@@ -192,7 +200,7 @@ const PitchPractice: React.FC = () => {
     const stopPractice = () => {
         setIsPracticing(false);
         
-        sessionPromiseRef.current?.then(session => session.close());
+        sessionPromiseRef.current?.then((session: any) => session.close());
         sessionPromiseRef.current = null;
         
         audioStreamRef.current?.getTracks().forEach(track => track.stop());
@@ -217,7 +225,8 @@ const PitchPractice: React.FC = () => {
     const generateFeedback = async (modelName: 'gemini-2.5-flash' | 'gemini-flash-lite-latest') => {
         setIsGeneratingFeedback(true);
         setFeedback('');
-        const fullTranscript = transcript.map(t => `${t.speaker === 'user' ? t('you') : t('client_ai')}: ${t.text}`).join('\n');
+        // FIX: Changed 't' to 'entry' to avoid shadowing the translation function 't'
+        const fullTranscript = transcript.map(entry => `${entry.speaker === 'user' ? t('you') : t('client_ai')}: ${entry.text}`).join('\n');
         
         const langMap: Record<string, string> = { 'nl': 'Dutch', 'en': 'English', 'de': 'German' };
         const targetLanguage = langMap[language] || 'Dutch';
@@ -249,7 +258,7 @@ const PitchPractice: React.FC = () => {
                 model: modelName,
                 contents: prompt,
             });
-            setFeedback(response.text);
+            setFeedback(response.text || '');
         } catch(e) {
             setFeedback(t('feedback_error'));
         } finally {
@@ -261,7 +270,8 @@ const PitchPractice: React.FC = () => {
         if (!selectedPitch || !feedback) return;
         setIsSharing(true);
         try {
-            const fullTranscript = transcript.map(t => `${t.speaker === 'user' ? t('you') : t('client_ai')}: ${t.text}`).join('\n');
+            // FIX: Changed 't' to 'entry' to avoid shadowing the translation function 't'
+            const fullTranscript = transcript.map(entry => `${entry.speaker === 'user' ? t('you') : t('client_ai')}: ${entry.text}`).join('\n');
             await sharePracticeResults({
                 pitchName: selectedPitch.name,
                 transcript: fullTranscript,

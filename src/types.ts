@@ -201,6 +201,8 @@ export interface Planning {
   companyId?: string;
 }
 
+// --- HIER ZAT DE FOUT ---
+// Ik heb taggedUsers en ownerId toegevoegd zodat Planning.tsx en AuthContext.tsx werken.
 export interface Appointment {
   id: string;
   title: string;
@@ -208,6 +210,8 @@ export interface Appointment {
   time: string; // HH:MM format
   notes: string;
   companyId?: string;
+  taggedUsers?: string[]; // NIEUW: Lijst met managers die dit mogen zien
+  ownerId?: string;       // NIEUW: De ID van de maker (nodig voor filtering)
 }
 
 export interface Invoice {

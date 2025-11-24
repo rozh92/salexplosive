@@ -1,0 +1,126 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // --- Helper Functies ---
+    function isSignedIn() { return request.auth != null; }
+    function getUserData(userId) { return get(/databases/$(database)/documents/users/$(userId)).data; }
+    function getMyData() { return getUserData(request.auth.uid); }
+    function iHaveCompanyId() { return "companyId" in getMyData() && getMyData().companyId != null; }
+    function isApproved() { return !("status" in getMyData()) || getMyData().status == 'approved'; }
+    function isSameCompanyAsMe(docData) { return iHaveCompanyId() && "companyId" in docData && getMyData().companyId == docData.companyId; }
+    function isOwner() { return isSignedIn() && getMyData().role == 'owner'; }
+    function isManager() { return isSignedIn() && getMyData().role == 'manager'; }
+    function isManagerOrOwner() { return isManager() || isOwner(); }
+    function isTeamLeader() { return isSignedIn() && getMyData().role == 'team-leader'; }
+    function isLeader() { return isSignedIn() && getMyData().role == 'leader'; }
+    function isLeadership() { return isManagerOrOwner() || isTeamLeader() || isLeader(); }
+    function canAccessBranchDoc(docData) {
+      return isOwner() || docData.branchName == getMyData().branchName || docData.branchName == '__ORGANIZATION__';
+    }
+
+    // --- Regels voor Gebruikers ---
+    match /users/{userId} {
+      // Lezen
+      allow get: if isSignedIn() && (request.auth.uid == userId || isOwner() || (isApproved() && isSameCompanyAsMe(resource.data)));
+      allow list: if isSignedIn();
+      
+      // Schrijven
+      allow create: if (request.auth == null && request.resource.data.role == 'owner') || (isSignedIn() && isApproved() && iHaveCompanyId() && getMyData().companyId == request.resource.data.companyId && ((isOwner() && request.resource.data.role != 'owner') || (isManager() && request.resource.data.role != 'manager' && request.resource.data.role != 'owner' && request.resource.data.branchName == getMyData().branchName) || (isTeamLeader() && (request.resource.data.role == 'salesperson' || request.resource.data.role == 'leader')) || (isLeader() && request.resource.data.role == 'salesperson')));
+
+      allow update: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && (
+        (request.auth.uid == userId) ||
+        (isOwner() && resource.data.role != 'owner') ||
+        (isManager() && getMyData().branchName == resource.data.branchName && resource.data.role != 'manager' && resource.data.role != 'owner') ||
+        (isTeamLeader() && resource.data.email in getMyData().teamMembers && ((resource.data.role == 'salesperson' && request.resource.data.role == 'leader') || (resource.data.role == 'leader' && request.resource.data.role == 'salesperson')))
+      );
+      
+      allow delete: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && ((isOwner() && request.auth.uid != userId) || (isManager() && getMyData().branchName == resource.data.branchName && request.auth.uid != userId));
+
+      // Specifieke regels voor 'sales'
+      match /sales/{saleId} {
+        allow get: if isSignedIn() && isApproved() && (request.auth.uid == userId || (isOwner() && isSameCompanyAsMe(getUserData(userId))) || (isManager() && getMyData().branchName == getUserData(userId).branchName));
+        allow list: if isSignedIn() && isApproved() && iHaveCompanyId();
+        allow create, update: if isSignedIn() && isApproved() && request.auth.uid == userId;
+        allow delete: if isSignedIn() && isApproved() && (request.auth.uid == userId || (isOwner() && isSameCompanyAsMe(getUserData(userId))) || (isManager() && getMyData().branchName == getUserData(userId).branchName));
+      }
+
+      // Algemene regels voor andere subcollecties
+      match /{subcollection}/{docId} {
+        allow get, create, update: if subcollection != 'sales' && isSignedIn() && request.auth.uid == userId && isApproved();
+        allow list, delete: if subcollection != 'sales' && isSignedIn() && isApproved() && (request.auth.uid == userId || (isOwner() && isSameCompanyAsMe(getUserData(userId))) || (isManager() && getMyData().branchName == getUserData(userId).branchName));
+      }
+    }
+
+    // --- Overige Collecties ---
+    match /branches/{branchId} {
+      allow get: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && (isOwner() || getMyData().branchName == branchId);
+      allow list: if isSignedIn() && isApproved() && iHaveCompanyId();
+      allow create: if isOwner() && isSameCompanyAsMe(request.resource.data);
+      allow update: if isOwner() || (isManager() && getMyData().branchName == branchId);
+      allow delete: if isOwner();
+    }
+
+    match /knowledgeBase/{docId} {
+      allow get: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && canAccessBranchDoc(resource.data);
+      allow list: if isSignedIn() && isApproved() && iHaveCompanyId();
+      allow create, update, delete: if isSignedIn() && isApproved() && isLeadership() && isSameCompanyAsMe(request.resource.data) && canAccessBranchDoc(request.resource.data);
+    }
+
+    match /motivationPosts/{docId} {
+      allow get: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && canAccessBranchDoc(resource.data);
+      allow list: if isSignedIn() && isApproved() && iHaveCompanyId();
+      allow create: if isSignedIn() && isApproved() && isLeadership() && isSameCompanyAsMe(request.resource.data) && canAccessBranchDoc(request.resource.data);
+      allow update, delete: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && ((isLeadership() && canAccessBranchDoc(resource.data)) || request.auth.uid == resource.data.authorId);
+    }
+
+    match /competitorNotes/{docId} {
+      allow get: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && canAccessBranchDoc(resource.data);
+      allow list: if isSignedIn() && isApproved() && iHaveCompanyId();
+      allow create: if isSignedIn() && isApproved() && isSameCompanyAsMe(request.resource.data);
+      allow update, delete: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && (isLeadership() || request.auth.uid == resource.data.authorId);
+    }
+
+    match /marketIntelligenceNotes/{docId} {
+      allow get: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && canAccessBranchDoc(resource.data);
+      allow list: if isSignedIn() && isApproved() && iHaveCompanyId();
+      allow create, update, delete: if isSignedIn() && isApproved() && isLeadership() && isSameCompanyAsMe(request.resource.data) && canAccessBranchDoc(request.resource.data);
+    }
+
+    match /productPackages/{docId} {
+      allow get: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && canAccessBranchDoc(resource.data);
+      allow list: if isSignedIn() && isApproved() && iHaveCompanyId();
+      allow create: if isSignedIn() && isApproved() && isManagerOrOwner() && isSameCompanyAsMe(request.resource.data) && canAccessBranchDoc(request.resource.data);
+      allow update, delete: if isSignedIn() && isApproved() && isManagerOrOwner() && isSameCompanyAsMe(resource.data) && canAccessBranchDoc(resource.data);
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isSignedIn() && isApproved() && isOwner() && isSameCompanyAsMe(resource.data);
+      allow write: if false;
+    }
+
+    // ... (je bestaande code)
+
+    match /trainingResults/{resultId} {
+      allow create: if isSignedIn() && isApproved() && request.auth.uid == request.resource.data.traineeId && isSameCompanyAsMe(request.resource.data);
+      allow read: if isSignedIn() && isApproved() && isSameCompanyAsMe(resource.data) && (request.auth.uid == resource.data.traineeId || request.auth.uid == resource.data.superiorId || isManagerOrOwner());
+      allow update: if isSignedIn() && isApproved() && request.auth.uid == resource.data.superiorId;
+      allow delete: if isSignedIn() && isApproved() && (request.auth.uid == resource.data.superiorId || isManagerOrOwner());
+    }
+
+    // --- NIEUW: REGELS VOOR DE GEDEELDE AGENDA ---
+    match /appointments/{appointmentId} {
+      // LEZEN: Je mag het zien als jij de eigenaar bent OF als jij getagd bent
+      allow read: if isSignedIn() && isApproved() && (
+        resource.data.ownerId == request.auth.uid || 
+        request.auth.uid in resource.data.taggedUsers
+      );
+
+      // MAKEN: Je mag aanmaken als je jezelf als eigenaar instelt
+      allow create: if isSignedIn() && isApproved() && request.resource.data.ownerId == request.auth.uid;
+
+      // BEWERKEN/VERWIJDEREN: Alleen de eigenaar mag wijzigen of verwijderen
+      allow update, delete: if isSignedIn() && isApproved() && resource.data.ownerId == request.auth.uid;
+    }
+    
+  } 
+}
